@@ -330,16 +330,48 @@ For example:
 Defaults are stored in ``bleach.css_sanitizer.ALLOWED_CSS_PROPERTIES`` and
 ``bleach.css_sanitizer.ALLOWED_SVG_PROPERTIES``.
 
+You can validate property values with the ``property_value_validators``
+argument, which maps a lowercase property name to a validator callable. The
+validator gets the property value as a string and returns the value to keep
+(which may be a normalized version of the input) or rejects the declaration
+by returning ``None`` or raising ``ValueError``. Invalid declarations are
+dropped while the rest are kept. Properties without a validator keep the
+property-name allowlist behavior::
+
+   >>> css_sanitizer = CSSSanitizer(
+   ...     allowed_css_properties=["width"],
+   ...     property_value_validators={
+   ...         "width": lambda value: value if value.endswith("px") else None
+   ...     },
+   ... )
+   >>> bleach.clean(
+   ...     '<p style="width: 100px; height: 100px;">my html</p>',
+   ...     tags=tags,
+   ...     attributes=attrs,
+   ...     css_sanitizer=css_sanitizer
+   ... )
+   '<p style="width: 100px;">my html</p>'
+
+Values for properties that have a validator also go through built-in checks:
+``expression(...)`` and ``javascript:`` are always rejected (case and
+whitespace are normalized before matching), and protocols in ``url()`` are
+restricted to ``http``, ``https`` and ``data``. Use the
+``allowed_url_protocols`` argument to change the allowed protocols. The same
+validation is applied to declarations inside ``@media`` blocks, and
+``!important`` does not bypass validators.
+
 .. Note::
 
-   This silently drops ParseError and AtRule tokens in CSS parsing. If you need
-   to sanitize style values that have ``@media`` or need to do something with
-   CSS parse errors, you should implement your own
+   When ``property_value_validators`` is not passed, this silently drops
+   ParseError and AtRule tokens (including ``@media``) in CSS parsing. If you
+   need different handling, you should implement your own
    :py:class:`bleach.css_sanitizer.CSSSanitizer`.
 
 .. autodata:: bleach.css_sanitizer.ALLOWED_CSS_PROPERTIES
 
 .. autodata:: bleach.css_sanitizer.ALLOWED_SVG_PROPERTIES
+
+.. autodata:: bleach.css_sanitizer.ALLOWED_URL_PROTOCOLS
 
 .. autoclass:: bleach.css_sanitizer.CSSSanitizer
 
