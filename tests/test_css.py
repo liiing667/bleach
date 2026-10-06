@@ -254,3 +254,181 @@ def test_css_parsing_with_entities(data, styles, expected):
         )
         == expected
     )
+
+
+def test_property_value_validator_normalizes():
+    css_sanitizer = CSSSanitizer(
+        allowed_css_properties=["width", "color"],
+        property_value_validators={"width": lambda value: value.lower()},
+    )
+    assert (
+        clean(
+            '<p style="width: 10PX; color: RED;">foo</p>',
+            css_sanitizer=css_sanitizer,
+        )
+        == '<p style="width: 10px; color: RED;">foo</p>'
+    )
+
+
+def test_property_value_validator_rejects_with_none():
+    css_sanitizer = CSSSanitizer(
+        allowed_css_properties=["width", "color"],
+        property_value_validators={"width": lambda value: None},
+    )
+    assert (
+        clean(
+            '<p style="width: 10px; color: red;">foo</p>',
+            css_sanitizer=css_sanitizer,
+        )
+        == '<p style="color: red;">foo</p>'
+    )
+
+
+def test_property_value_validator_rejects_with_valueerror():
+    def reject(value):
+        raise ValueError("invalid value")
+
+    css_sanitizer = CSSSanitizer(
+        allowed_css_properties=["width", "color"],
+        property_value_validators={"width": reject},
+    )
+    assert (
+        clean(
+            '<p style="width: 10px; color: red;">foo</p>',
+            css_sanitizer=css_sanitizer,
+        )
+        == '<p style="color: red;">foo</p>'
+    )
+
+
+def test_property_value_validator_returning_bad_type():
+    css_sanitizer = CSSSanitizer(
+        allowed_css_properties=["width"],
+        property_value_validators={"width": lambda value: 42},
+    )
+    with pytest.raises(TypeError):
+        clean('<p style="width: 10px;">foo</p>', css_sanitizer=css_sanitizer)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "expression(alert(1))",
+        "EXPRESSION(alert(1))",
+        "expression (alert(1))",
+        "expre\tssion(alert(1))",
+        "expression(alert(1)) !important",
+    ],
+)
+def test_property_value_validator_rejects_expression(value):
+    css_sanitizer = CSSSanitizer(
+        allowed_css_properties=["width", "color"],
+        property_value_validators={"width": lambda value: value},
+    )
+    assert (
+        clean(
+            '<p style="width: %s; color: red;">foo</p>' % value,
+            css_sanitizer=css_sanitizer,
+        )
+        == '<p style="color: red;">foo</p>'
+    )
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        ("url(javascript:alert(1))", ""),
+        ("url(JAVASCRIPT:alert(1))", ""),
+        ("url(  javascript:alert(1)  )", ""),
+        ("url('javascript:alert(1)')", ""),
+        ('url("javascript:alert(1)")', ""),
+        ("url(javascript:alert)", ""),
+        ("url(ftp://example.com/x.png)", ""),
+        ("url(http://example.com/x.png)", "url(http://example.com/x.png)"),
+        ("url(HTTPS://example.com/x.png)", "url(HTTPS://example.com/x.png)"),
+        ("url(data:image/png;base64,AAA)", "url(data:image/png;base64,AAA)"),
+        ("url(topbanner.png)", "url(topbanner.png)"),
+    ],
+)
+def test_property_value_validator_url_protocols(value, expected):
+    css_sanitizer = CSSSanitizer(
+        allowed_css_properties=["background"],
+        property_value_validators={"background": lambda value: value},
+    )
+    style = "background: %s;" % value
+    if expected:
+        expected = '<p style="background: %s;">foo</p>' % expected
+    else:
+        expected = '<p style="">foo</p>'
+    assert (
+        clean('<p style="%s">foo</p>' % style, css_sanitizer=css_sanitizer)
+        == expected
+    )
+
+
+def test_property_value_validator_allowed_url_protocols():
+    css_sanitizer = CSSSanitizer(
+        allowed_css_properties=["background"],
+        property_value_validators={"background": lambda value: value},
+        allowed_url_protocols=("https",),
+    )
+    assert (
+        clean(
+            '<p style="background: url(http://example.com/x.png);">foo</p>',
+            css_sanitizer=css_sanitizer,
+        )
+        == '<p style="">foo</p>'
+    )
+    assert (
+        clean(
+            '<p style="background: url(https://example.com/x.png);">foo</p>',
+            css_sanitizer=css_sanitizer,
+        )
+        == '<p style="background: url(https://example.com/x.png);">foo</p>'
+    )
+
+
+def test_property_value_validator_important():
+    css_sanitizer = CSSSanitizer(
+        allowed_css_properties=["width"],
+        property_value_validators={"width": lambda value: value},
+    )
+    assert (
+        clean(
+            '<p style="width: 10px !important;">foo</p>',
+            css_sanitizer=css_sanitizer,
+        )
+        == '<p style="width: 10px !important;">foo</p>'
+    )
+
+
+def test_property_value_validator_media():
+    css_sanitizer = CSSSanitizer(
+        allowed_css_properties=["width", "color"],
+        property_value_validators={"width": lambda value: value},
+    )
+    assert (
+        clean(
+            '<p style="@media screen { width: expression(x); color: red; }">foo</p>',
+            css_sanitizer=css_sanitizer,
+        )
+        == '<p style="@media screen { color: red; }">foo</p>'
+    )
+    assert (
+        clean(
+            '<p style="@media screen { width: expression(x); }">foo</p>',
+            css_sanitizer=css_sanitizer,
+        )
+        == '<p style="">foo</p>'
+    )
+
+
+def test_at_rules_dropped_without_validators():
+    css_sanitizer = CSSSanitizer(allowed_css_properties=["color"])
+    assert (
+        clean(
+            '<p style="@media screen { color: red; } color: blue;">foo</p>',
+            css_sanitizer=css_sanitizer,
+        )
+        == '<p style="color: blue;">foo</p>'
+    )
